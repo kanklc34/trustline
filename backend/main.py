@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 from camara import check_sim_swap
 from oauth import router as auth_router, verification_results
+from agent import run_trust_agent
 
 # Çevresel değişkenleri .env dosyasından yükle
 load_dotenv()
@@ -31,6 +32,10 @@ app.include_router(auth_router)
 class PhoneRequest(BaseModel):
     phone_number: str
 
+class EvaluateRequest(BaseModel):
+    phone_number: str
+    action_type: str = "login"
+
 @app.get("/")
 def read_root():
     """API'nin ayakta olup olmadığını kontrol etmek için basit bir uç nokta."""
@@ -38,26 +43,44 @@ def read_root():
 
 @app.post("/api/sim-swap-check")
 async def api_sim_swap_check(request: PhoneRequest):
-    """
-    Verilen numara için SIM swap sinyalini toplar.
-    Bu uç nokta, ileride ajanın "collect_signals" aşamasında kullanılacak, 
-    şu an test için bağımsız olarak eklendi.
-    """
+    """(Test Endpoint'i) Verilen numara için bağımsız SIM swap sinyalini test eder."""
     try:
         result = await check_sim_swap(request.phone_number)
         return {"success": True, "data": result}
     except Exception as e:
-        # Hata durumlarında düzgün JSON hata mesajı dönmesi için HTTPException kullanıyoruz
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/number-verification-result/{phone_number}")
 async def get_verification_result(phone_number: str):
-    """
-    Number Verification OAuth akışının sonucunu döndürür.
-    LangGraph ajanı 'collect_signals' adımındayken buraya veya doğrudan bellek içi 'verification_results' 
-    sözlüğüne bakarak durumun tamamlanıp tamamlanmadığını anlayacak.
-    """
+    """(Test Endpoint'i) Number Verification OAuth akışının mevcut durumunu döndürür."""
     result = verification_results.get(phone_number)
     if not result:
         return {"status": "pending", "verified": None, "message": "Henüz OAuth akışı başlatılmadı veya devam ediyor."}
     return result
+
+@app.post("/api/evaluate")
+async def api_evaluate_trust(request: EvaluateRequest):
+    """
+    [ANA UÇ NOKTA] Frontend üzerinden çağrıldığında LangGraph AI ajanını tetikler.
+    Ajan, 'collect_signals' -> 'evaluate_risk' -> 'decide' -> 'explain' adımlarını çalıştırır
+    ve nihai bir karar döner.
+    """
+    try:
+        final_state = await run_trust_agent(request.phone_number, request.action_type)
+        return {
+            "success": True,
+            "data": {
+                "phone_number": final_state.get("phone_number"),
+                "action_type": final_state.get("action_type"),
+                "trust_score": final_state.get("trust_score"),
+                "decision": final_state.get("decision"),
+                "explanation": final_state.get("explanation"),
+                "reasoning": final_state.get("reasoning"),
+                "signals": {
+                    "sim_swap": final_state.get("sim_swap_result"),
+                    "number_verification": final_state.get("number_verification_result")
+                }
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ajan çalıştırılırken hata oluştu: {str(e)}")
