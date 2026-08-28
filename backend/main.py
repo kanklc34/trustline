@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from camara import check_sim_swap
+from oauth import router as auth_router, verification_results
 
 # Çevresel değişkenleri .env dosyasından yükle
 load_dotenv()
@@ -22,6 +23,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# OAuth 2.0 (Number Verification) yönlendirmelerini içeren router'ı ana uygulamaya bağlıyoruz
+app.include_router(auth_router)
 
 # İstek (Request) gövdeleri için Pydantic modelleri
 class PhoneRequest(BaseModel):
@@ -45,3 +49,15 @@ async def api_sim_swap_check(request: PhoneRequest):
     except Exception as e:
         # Hata durumlarında düzgün JSON hata mesajı dönmesi için HTTPException kullanıyoruz
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/number-verification-result/{phone_number}")
+async def get_verification_result(phone_number: str):
+    """
+    Number Verification OAuth akışının sonucunu döndürür.
+    LangGraph ajanı 'collect_signals' adımındayken buraya veya doğrudan bellek içi 'verification_results' 
+    sözlüğüne bakarak durumun tamamlanıp tamamlanmadığını anlayacak.
+    """
+    result = verification_results.get(phone_number)
+    if not result:
+        return {"status": "pending", "verified": None, "message": "Henüz OAuth akışı başlatılmadı veya devam ediyor."}
+    return result
