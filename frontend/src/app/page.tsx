@@ -2,12 +2,23 @@
 
 import { useState } from "react";
 
+interface AgentResult {
+  phone_number: string;
+  trust_score: number;
+  decision: string;
+  reasoning: string;
+  signals: {
+    sim_swap: Record<string, unknown>;
+    number_verification: { status?: string; verified?: boolean; [key: string]: unknown };
+  };
+}
+
 export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState("+99999991000");
   const [actionType, setActionType] = useState("login");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string[]>([]);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<AgentResult | null>(null);
 
   const checkTrust = async () => {
     setLoading(true);
@@ -46,8 +57,9 @@ export default function Home() {
       setResult(data.data);
       setProgress((prev) => [...prev, "✅ [explain] Analiz ve paketleme tamamlandı."]);
       
-    } catch (error: any) {
-      setProgress((prev) => [...prev, `❌ Hata: ${error.message}`]);
+    } catch (error: unknown) {
+      const err = error as Error;
+      setProgress((prev) => [...prev, `❌ Hata: ${err.message}`]);
     } finally {
       setLoading(false);
     }
