@@ -10,6 +10,7 @@ interface AgentResult {
   signals: {
     sim_swap: Record<string, unknown>;
     number_verification: { status?: string; verified?: boolean; [key: string]: unknown };
+    device_status?: Record<string, unknown>;
   };
 }
 
@@ -32,7 +33,7 @@ export default function Home() {
       await new Promise((r) => setTimeout(r, 800)); 
 
       // Step 2: Evaluate
-      setProgress((prev) => [...prev, "🧠 [evaluate_risk] AI Ajanı risk değerlendirmesi yapıyor (Gemini 2.5 Flash)..."]);
+      setProgress((prev) => [...prev, "🧠 [evaluate_risk] AI Ajanı risk değerlendirmesi yapıyor (Gemini 3.5 Flash Lite)..."]);
       
       const res = await fetch("http://localhost:8000/api/evaluate", {
         method: "POST",
@@ -75,9 +76,12 @@ export default function Home() {
   return (
     <main className="min-h-screen p-8 font-sans text-gray-900">
       <div className="max-w-3xl mx-auto space-y-8">
-        <header className="text-center space-y-2">
+        <header className="text-center space-y-2 relative">
           <h1 className="text-4xl font-bold text-blue-900 tracking-tight">TrustLine</h1>
           <p className="text-gray-500">AI-Powered Real-Time Trust Score using CAMARA Network Signals</p>
+          <div className="absolute top-0 right-0">
+            <a href="/dashboard" className="text-sm text-blue-600 hover:text-blue-800 font-medium">Partner Dashboard &rarr;</a>
+          </div>
         </header>
 
         <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 space-y-4">
@@ -151,7 +155,7 @@ export default function Home() {
 
             <div className="space-y-3">
               <h3 className="font-semibold text-gray-700 border-b border-gray-100 pb-2">Kullanılan Sinyaller (CAMARA)</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-sm">
                   <div className="text-xs text-gray-500 mb-2 font-semibold uppercase tracking-wider">SIM Swap Check</div>
                   <pre className="font-mono text-xs bg-gray-100 p-2 rounded overflow-x-auto text-gray-800">
@@ -175,6 +179,12 @@ export default function Home() {
                       OAuth Doğrulamasını Başlat ↗
                     </a>
                   )}
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-sm">
+                  <div className="text-xs text-gray-500 mb-2 font-semibold uppercase tracking-wider">Device Status</div>
+                  <pre className="font-mono text-xs bg-gray-100 p-2 rounded overflow-x-auto text-gray-800">
+                    {JSON.stringify(result.signals.device_status || {}, null, 2)}
+                  </pre>
                 </div>
               </div>
             </div>

@@ -5,7 +5,7 @@
 ## Architecture
 
 - **Backend**: Python + FastAPI
-- **AI Agent**: LangGraph (State Machine) + Google Gemini 2.5 Flash
+- **AI Agent**: LangGraph (State Machine) + Google Gemini 3.5 Flash Lite
 - **Frontend**: Next.js (App Router) + TailwindCSS
 - **Network APIs**: Nokia Network-as-Code (NaC) Sandbox (SIM Swap & Number Verification)
 
@@ -36,7 +36,7 @@ Follow these steps to run the complete environment (Backend + Frontend) locally.
    ```bash
    pip install -r requirements.txt
    ```
-4. Create your `.env` file:
+4. Create your `.env` file (⚠️ must be created **inside the `backend/` folder**, next to `.env.example` — not in the project root):
    ```bash
    cp .env.example .env
    ```
@@ -84,3 +84,15 @@ Once both servers are running, use the UI at `http://localhost:3000` to test the
    - Input: `+99999990500` or any number without completed OAuth.
    - Expected: Medium trust score (40-69), yellow STEP_UP_VERIFICATION card.
    - *You can click the "OAuth Doğrulamayı Başlat" link in the UI to simulate the 3-legged Number Verification flow.*
+
+---
+
+## ⚠️ Note on Data & Privacy
+
+This is a hackathon prototype. All testing uses Nokia NaC's **simulator phone numbers** — no real user data is collected, stored, or processed. A production deployment of TrustLine would require full compliance with applicable data protection regulations (e.g. GDPR, KVKK) before processing real phone numbers or telecom signals.
+
+## Yeni Özellikler (v2)
+
+- **Device Status Sinyali**: CAMARA üzerinden cihazın ağa bağlı olup olmadığını kontrol eden üçüncü bir risk sinyali eklendi.
+- **Entegrasyon Rehberi**: Fintech/E-ticaret sistemlerinin API'yi nasıl çağıracağını ve örnek fiyatlandırmayı gösteren `backend/INTEGRATION.md` belgesi eklendi.
+- **Partner Dashboard**: Yapılan risk değerlendirmelerini listeleyen, onay/ret istatistiklerini maskeli numaralarla gösteren bir raporlama arayüzü ve API eklendi.

@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from camara import check_sim_swap
 from oauth import router as auth_router, verification_results
 from agent import run_trust_agent
+from history import add_to_history, get_dashboard_summary
 
 # Çevresel değişkenleri .env dosyasından yükle
 load_dotenv()
@@ -67,6 +68,14 @@ async def api_evaluate_trust(request: EvaluateRequest):
     """
     try:
         final_state = await run_trust_agent(request.phone_number, request.action_type)
+        
+        # Dashboard geçmişine ekle
+        add_to_history(
+            phone_number=final_state.get("phone_number"),
+            decision=final_state.get("decision"),
+            trust_score=final_state.get("trust_score")
+        )
+        
         return {
             "success": True,
             "data": {
@@ -78,9 +87,17 @@ async def api_evaluate_trust(request: EvaluateRequest):
                 "reasoning": final_state.get("reasoning"),
                 "signals": {
                     "sim_swap": final_state.get("sim_swap_result"),
-                    "number_verification": final_state.get("number_verification_result")
+                    "number_verification": final_state.get("number_verification_result"),
+                    "device_status": final_state.get("device_status_result")
                 }
             }
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ajan çalıştırılırken hata oluştu: {str(e)}")
+
+@app.get("/api/dashboard-summary")
+def api_dashboard_summary():
+    """
+    Dashboard için geçmiş özetini ve son işlemleri döndürür.
+    """
+    return get_dashboard_summary()

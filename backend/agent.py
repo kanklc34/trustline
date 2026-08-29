@@ -3,10 +3,10 @@ import json
 import asyncio
 from typing import Dict, Any, TypedDict
 from langgraph.graph import StateGraph, END
-import google.generativeai as genai
+from google import genai
 
 from risk_policy import RISK_POLICY_PROMPT
-from camara import check_sim_swap
+from camara import check_sim_swap, check_device_status
 from oauth import verification_results
 
 # 1. State Tanımlaması (State Machine'in her düğümde güncellediği veri yapısı)
@@ -17,6 +17,7 @@ class TrustAgentState(TypedDict):
     # Sinyaller
     sim_swap_result: dict
     number_verification_result: dict
+    device_status_result: dict
     
     # Gemini Değerlendirmesi
     trust_score: int
@@ -29,18 +30,20 @@ class TrustAgentState(TypedDict):
 
 # 2. Düğümler (Nodes)
 async def collect_signals(state: TrustAgentState) -> dict:
-    """SIM Swap ve Number Verification sinyallerini toplar."""
+    """SIM Swap, Number Verification ve Device Status sinyallerini toplar."""
     phone_number = state["phone_number"]
     
-    # SIM Swap isteğini yapıyoruz
+    # Sinyalleri topluyoruz
     sim_swap_data = await check_sim_swap(phone_number)
+    device_status_data = await check_device_status(phone_number)
     
     # Number Verification OAuth ile asenkron tamamlandığı için bellekteki son durumuna bakıyoruz
     nv_data = verification_results.get(phone_number, {"status": "pending", "verified": None})
     
     return {
         "sim_swap_result": sim_swap_data,
-        "number_verification_result": nv_data
+        "number_verification_result": nv_data,
+        "device_status_result": device_status_data
     }
 
 def evaluate_risk(state: TrustAgentState) -> dict:
@@ -67,9 +70,8 @@ def evaluate_risk(state: TrustAgentState) -> dict:
             "confidence": "medium"
         }
     
-    # Gerçek Gemini entegrasyonu
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # Gerçek Gemini entegrasyonu (yeni google-genai SDK)
+    client = genai.Client(api_key=api_key)
     
     prompt = f"""
     {RISK_POLICY_PROMPT}
@@ -78,10 +80,14 @@ def evaluate_risk(state: TrustAgentState) -> dict:
     - Action Type: {state["action_type"]}
     - SIM Swap Result: {json.dumps(state["sim_swap_result"])}
     - Number Verification Result: {json.dumps(state["number_verification_result"])}
+    - Device Status Result: {json.dumps(state["device_status_result"])}
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-3.5-flash-lite",
+            contents=prompt,
+        )
         # JSON ayrıştırma (bazı LLM'ler markdown bloğu içinde dönebilir, temizliyoruz)
         response_text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(response_text)
