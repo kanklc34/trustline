@@ -72,10 +72,11 @@ Follow these steps to run the complete environment (Backend + Frontend) locally.
 
 Once both servers are running, use the UI at `http://localhost:3000` to test the agent:
 
-1. **Clean Number (APPROVE)**:
+1. **Clean Number (STEP_UP → APPROVE after OAuth)**:
    - Input: `+99999991000`
-   - Expected: High trust score (85+), green APPROVE card.
-   - *Note: This is a fixed demo scenario number handled entirely by the backend — it does not call the real Nokia sandbox, since Nokia's generic simulator numbers were found to return inconsistent SIM Swap results in testing.*
+   - Expected right after entering the number: medium trust score (~60), yellow STEP_UP_VERIFICATION card — this is because SIM Swap is a fixed-clean demo scenario, but Number Verification starts as "pending" until OAuth completes.
+   - Click "Start OAuth Verification" on the result card to run the real 3-legged Number Verification OAuth flow for this number (it's not fictional like the other demo numbers, so it can complete a real Nokia consent flow). Once verified, the page automatically re-checks and the score rises to 85+, green APPROVE.
+   - *Note: SIM Swap and Device Status for this number are a fixed demo scenario handled entirely by the backend — they do not call the real Nokia sandbox, since Nokia's generic simulator numbers were found to return inconsistent SIM Swap results in testing. Only Number Verification uses the real OAuth flow for this number.*
 
 2. **SIM Swapped Recently (BLOCK)**:
    - Input: `+90000000001`

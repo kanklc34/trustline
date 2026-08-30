@@ -1,15 +1,33 @@
 import os
 import httpx
 import urllib.parse
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from nokia_client import get_nokia_headers
+from camara import (
+    DEMO_CLEAN_NUMBER,
+    DEMO_SWAPPED_NUMBER,
+    DEMO_NOT_CONNECTED_NUMBER,
+    DEMO_PENDING_VERIFICATION_NUMBER,
+)
+
+DEMO_NUMBERS = {
+    DEMO_CLEAN_NUMBER,
+    DEMO_SWAPPED_NUMBER,
+    DEMO_NOT_CONNECTED_NUMBER,
+    DEMO_PENDING_VERIFICATION_NUMBER,
+}
 
 router = APIRouter()
 
 # In-memory data store: Temporary structure to hold verification results upon OAuth callback.
 # In a real production system, this data should be stored in a distributed/persistent database like Redis.
 verification_results = {}
+
+# Where the frontend lives — used to redirect the user back to the UI after
+# completing the OAuth consent flow, instead of leaving them on a bare JSON
+# response. Mirrors the frontend's own NEXT_PUBLIC_API_URL pattern.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 # Real host verified in SIM Swap test: network-as-code.p-eu.apihub.nokia.io
 NAC_AUTH_HOST = "https://network-as-code.p-eu.apihub.nokia.io"
@@ -62,11 +80,16 @@ async def start_verification(phone_number: str):
     api_key = os.getenv("NOKIA_NAC_API_KEY")
     redirect_uri = os.getenv("REDIRECT_URI", "http://localhost:8000/auth/number-verification/callback")
 
-    # If the API key is not defined, a mock redirect is performed so as not to break developer experience (DX).
-    if not api_key or api_key == "your_nokia_nac_api_key_here":
+    # Demo scenario numbers are fictional (not real Nokia sandbox devices), so they
+    # can never complete a real OAuth consent flow — Nokia's authorization server
+    # correctly rejects them with "Unknown device". Route them through the same
+    # mock flow used when no API key is configured, so clicking "Start OAuth
+    # Verification" on a demo number always works predictably in a demo.
+    if not api_key or api_key == "your_nokia_nac_api_key_here" or phone_number in DEMO_NUMBERS:
         print(f"[MOCK] OAuth Start: Initiating mock flow for '{phone_number}'.")
         mock_code = "mock_auth_code_for_" + phone_number.replace("+", "")
-        return RedirectResponse(url=f"{redirect_uri}?code={mock_code}&state={phone_number}")
+        redirect_params = urllib.parse.urlencode({"code": mock_code, "state": phone_number})
+        return RedirectResponse(url=f"{redirect_uri}?{redirect_params}")
 
     try:
         config = await get_oauth_config()
@@ -91,7 +114,12 @@ async def start_verification(phone_number: str):
     return RedirectResponse(url=url)
 
 @router.get("/auth/number-verification/callback", tags=["OAuth"])
-async def verification_callback(code: str, state: str):
+async def verification_callback(
+    code: str | None = Query(default=None),
+    state: str = Query(...),
+    error: str | None = Query(default=None),
+    error_description: str | None = Query(default=None),
+):
     """
     [Steps 4 and 5] The endpoint called when the user returns from the network provider (consent).
     The 'code' is exchanged for a token, and a request is made to the actual Number Verification API with this token.
@@ -104,17 +132,38 @@ async def verification_callback(code: str, state: str):
         phone_number = "+" + phone_number.lstrip()
     redirect_uri = os.getenv("REDIRECT_URI", "http://localhost:8000/auth/number-verification/callback")
 
+    # The provider can redirect back with an error instead of a code (e.g. the
+    # user declined consent, or — as with our demo scenario numbers — the
+    # number isn't a real device Nokia's sandbox recognizes). Handle this
+    # explicitly instead of letting FastAPI reject the request for a missing
+    # 'code' and hide the real reason from the user.
+    if error or not code:
+        print(f"[ERROR] OAuth provider returned an error for '{phone_number}': {error} - {error_description}")
+        verification_results[phone_number] = {
+            "verified": False,
+            "status": "failed",
+            "error": error or "missing_code",
+            "error_description": error_description,
+        }
+        redirect_url = (
+            f"{FRONTEND_URL}/?verification=failed"
+            f"&phone_number={urllib.parse.quote(phone_number)}"
+            f"&reason={urllib.parse.quote(error_description or error or 'Unknown error')}"
+        )
+        return RedirectResponse(url=redirect_url)
+
     # Mock / Simulation logic (If real credentials are not present)
     if code.startswith("mock_auth_code_for_"):
         print(f"[MOCK] Callback received. Number: {phone_number}")
         # Test scenario: If the number is '+99999990500', return verification as failed (False)
         is_verified = False if phone_number == "+99999990500" else True
         verification_results[phone_number] = {"verified": is_verified, "status": "completed"}
-        return {
-            "message": "Verification simulated (MOCK).", 
-            "phone_number": phone_number, 
-            "verified": is_verified
-        }
+        redirect_url = (
+            f"{FRONTEND_URL}/?verification=completed"
+            f"&verified={str(is_verified).lower()}"
+            f"&phone_number={urllib.parse.quote(phone_number)}"
+        )
+        return RedirectResponse(url=redirect_url)
 
     try:
         config = await get_oauth_config()
@@ -162,13 +211,19 @@ async def verification_callback(code: str, state: str):
                 "raw_data": verify_data,
                 "status": "completed"
             }
-            
-            return {
-                "message": "Number Verification completed successfully.", 
-                "verified": is_verified
-            }
+
+            redirect_url = (
+                f"{FRONTEND_URL}/?verification=completed"
+                f"&verified={str(is_verified).lower()}"
+                f"&phone_number={urllib.parse.quote(phone_number)}"
+            )
+            return RedirectResponse(url=redirect_url)
 
         except httpx.HTTPStatusError as e:
             print(f"[ERROR] Number Verification Error: {e.response.text}")
             verification_results[phone_number] = {"verified": False, "status": "failed", "error": str(e)}
-            raise HTTPException(status_code=500, detail="A network error occurred during verification.")
+            redirect_url = (
+                f"{FRONTEND_URL}/?verification=failed"
+                f"&phone_number={urllib.parse.quote(phone_number)}"
+            )
+            return RedirectResponse(url=redirect_url)

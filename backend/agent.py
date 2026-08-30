@@ -83,21 +83,9 @@ def evaluate_risk(state: TrustAgentState) -> dict:
     
     # Real Gemini integration (new google-genai SDK)
     client = genai.Client(api_key=api_key)
-    
+
     prompt = f"""
     {RISK_POLICY_PROMPT}
-    
-    Return the response in the following JSON format:
-    {{
-      "trust_score": 45,
-      "signal_breakdown": [
-        {{"signal": "sim_swap", "impact": "negative", "points": -30, "note": "SIM has changed within the last 10 days"}},
-        {{"signal": "number_verification", "impact": "neutral", "points": 0, "note": "Verification is not complete yet"}},
-        {{"signal": "device_status", "impact": "positive", "points": 5, "note": "Device is actively connected (CONNECTED_DATA)"}}
-      ],
-      "reasoning": "General summary sentence goes here",
-      "confidence": "medium"
-    }}
 
     CURRENT STATE:
     - Action Type: {state["action_type"]}

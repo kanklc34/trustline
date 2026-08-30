@@ -15,6 +15,7 @@ Rules:
 5. High-risk operations like 'password_reset' or 'checkout' should receive stricter (lower) scores in suspicious situations compared to a 'login' operation.
 6. If the Device Status is "NOT_CONNECTED" (device is not connected to the network), this is suspicious in itself — it is not normal to receive a transaction request while the device is off or out of coverage. In this case, reduce the score by at least 20 points and explicitly state this in the reasoning field. "CONNECTED_DATA" or "CONNECTED_SMS" statuses are considered normal and do not require extra point reduction.
 7. If any signal could not be retrieved due to a technical error (SIM Swap value is null/None, or Device Status is "UNKNOWN"), treat that specific signal as UNVERIFIED — not as "clean" and not as "risky". Do not assume it is safe. In this case, apply the same treatment as Rule 3 (medium risk, score 50-65) unless another rule already produces a stricter (lower) score, and explicitly state in the reasoning field that this signal was unavailable due to a technical error.
+8. In the "signal_breakdown" array, the "impact" field MUST directly match the "points" value for that signal: points > 0 -> impact MUST be "positive"; points < 0 -> impact MUST be "negative"; points == 0 -> impact MUST be "neutral". Never label a 0-point signal as "positive" or "negative" — a signal that had no effect on the score is neutral, even if the underlying condition (e.g. "no SIM swap detected") sounds reassuring. Reassuring-but-uncounted information belongs in the "note" text, not in the impact/points fields.
 
 When making your assessment, evaluate EACH of the three signals individually and state how each signal contributed to the decision in the reasoning field — do not just mention SIM Swap and Number Verification and skip Device Status.
 
@@ -24,6 +25,11 @@ Absolutely do not add any extra text (including markdown blocks), ONLY return pu
 Expected JSON Format:
 {
   "trust_score": 85,
+  "signal_breakdown": [
+    {"signal": "sim_swap", "impact": "neutral", "points": 0, "note": "No recent SIM change detected"},
+    {"signal": "number_verification", "impact": "positive", "points": 15, "note": "Number is verified"},
+    {"signal": "device_status", "impact": "positive", "points": 5, "note": "Device is actively connected (CONNECTED_DATA)"}
+  ],
   "reasoning": "The number matches the device, no recent SIM change was detected, and the device is connected to the network (CONNECTED_DATA). The operation appears secure.",
   "confidence": "high"
 }

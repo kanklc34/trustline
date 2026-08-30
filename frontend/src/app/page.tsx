@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { API_BASE_URL } from "@/lib/config";
 
 interface AgentResult {
@@ -16,7 +17,12 @@ interface AgentResult {
   }[];
   signals: {
     sim_swap: Record<string, unknown>;
-    number_verification: { status?: string; verified?: boolean; [key: string]: unknown };
+    number_verification: {
+      status?: string;
+      verified?: boolean;
+      _demo_scenario?: boolean;
+      [key: string]: unknown;
+    };
     device_status?: Record<string, unknown>;
   };
 }
@@ -37,7 +43,8 @@ function Spinner() {
   );
 }
 
-export default function Home() {
+function HomeContent() {
+  const searchParams = useSearchParams();
   const [phoneNumber, setPhoneNumber] = useState("+99999991000");
   const [actionType, setActionType] = useState("login");
   const [loading, setLoading] = useState(false);
@@ -45,6 +52,54 @@ export default function Home() {
   const [result, setResult] = useState<AgentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [verificationNotice, setVerificationNotice] = useState<{
+    status: "completed" | "failed";
+    verified?: boolean;
+    phoneNumber: string;
+    reason?: string;
+  } | null>(null);
+  // Set right after an OAuth redirect with verified=true; consumed by the
+  // effect below to auto re-run Check Trust once checkTrust is defined.
+  const [pendingAutoCheck, setPendingAutoCheck] = useState<string | null>(null);
+  // Anchors the progress/result area so we can scroll it into view once a
+  // check starts — otherwise the result renders below the fold and the user
+  // has to manually scroll down to notice anything happened (especially
+  // jarring right after the auto re-check that follows OAuth verification).
+  const resultAreaRef = useRef<HTMLDivElement | null>(null);
+  // Set to true right when a user-triggered (non-silent) check starts;
+  // consumed by the effect below once the progress section has actually
+  // rendered, so the scroll fires after React commits the DOM change
+  // instead of racing it via requestAnimationFrame.
+  const [shouldScrollToResult, setShouldScrollToResult] = useState(false);
+
+  // Pick up the ?verification=completed|failed&verified=...&phone_number=...
+  // query params that the backend redirects to after the OAuth consent flow
+  // finishes, so the user sees a clear confirmation instead of landing on a
+  // bare JSON response. When verification succeeded, automatically re-run
+  // Check Trust for that number so the user sees the updated score/decision
+  // without having to click anything.
+  useEffect(() => {
+    const verification = searchParams.get("verification");
+    const phone = searchParams.get("phone_number");
+    if (!verification || !phone) return;
+
+    if (verification === "completed") {
+      const verified = searchParams.get("verified") === "true";
+      setVerificationNotice({ status: "completed", verified, phoneNumber: phone });
+      setPhoneNumber(phone);
+      if (verified) {
+        setPendingAutoCheck(phone);
+      }
+    } else if (verification === "failed") {
+      const reason = searchParams.get("reason") || undefined;
+      setVerificationNotice({ status: "failed", phoneNumber: phone, reason });
+      setPhoneNumber(phone);
+    }
+
+    // Clean the query params from the URL so a page refresh doesn't re-show the notice.
+    window.history.replaceState({}, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const validatePhone = (value: string): string | null => {
     if (!value.trim()) return "Phone number is required.";
@@ -52,8 +107,9 @@ export default function Home() {
     return null;
   };
 
-  const checkTrust = async () => {
-    const validationError = validatePhone(phoneNumber);
+  const checkTrust = async (overridePhoneNumber?: string, options?: { silent?: boolean }) => {
+    const phoneToCheck = overridePhoneNumber ?? phoneNumber;
+    const validationError = validatePhone(phoneToCheck);
     if (validationError) {
       setPhoneError(validationError);
       return;
@@ -67,6 +123,17 @@ export default function Home() {
     try {
       // Step 1: Collect
       setProgress(["📡 [collect_signals] Collecting signals (SIM Swap, Number Verification)..."]);
+
+      // Only auto-scroll when the user explicitly triggered this (clicked
+      // the button) — for the automatic re-check after OAuth, the user is
+      // already looking at this part of the page, so jumping the viewport
+      // again would be jarring rather than helpful. The actual scroll
+      // happens in the effect below, once the progress section has
+      // rendered in the DOM.
+      if (!options?.silent) {
+        setShouldScrollToResult(true);
+      }
+
       await new Promise((r) => setTimeout(r, 800));
 
       // Step 2: Evaluate
@@ -75,7 +142,7 @@ export default function Home() {
       const res = await fetch(`${API_BASE_URL}/api/evaluate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone_number: phoneNumber, action_type: actionType }),
+        body: JSON.stringify({ phone_number: phoneToCheck, action_type: actionType }),
       });
 
       const data = await res.json();
@@ -92,6 +159,12 @@ export default function Home() {
 
       setResult(data.data);
       setProgress((prev) => [...prev, "✅ [explain] Analysis and packaging complete."]);
+      // Once the fresh result is in, the "refreshing the trust score" notice
+      // has served its purpose — clear it so it doesn't sit there stale next
+      // to an already-updated result.
+      if (options?.silent) {
+        setVerificationNotice(null);
+      }
     } catch (err: unknown) {
       const e = err as Error;
       setError(e.message || "An unexpected error occurred.");
@@ -99,6 +172,28 @@ export default function Home() {
       setLoading(false);
     }
   };
+
+  // Scrolls the progress/result section into view once it has actually
+  // rendered in the DOM (progress went from empty to non-empty). Using an
+  // effect keyed on `progress` guarantees this runs after React commits the
+  // new DOM node, unlike requestAnimationFrame right after setProgress,
+  // which can race React's batched update and fire before the section exists.
+  useEffect(() => {
+    if (!shouldScrollToResult || progress.length === 0) return;
+    setShouldScrollToResult(false);
+    resultAreaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [progress, shouldScrollToResult]);
+
+  // Auto re-run Check Trust once, right after a successful OAuth verification
+  // redirect, so the user sees the updated score without lifting a finger.
+  // Runs "silently": no extra scroll jump, and the notice above clears once done.
+  useEffect(() => {
+    if (!pendingAutoCheck) return;
+    const phone = pendingAutoCheck;
+    setPendingAutoCheck(null);
+    checkTrust(phone, { silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoCheck]);
 
   const getDecisionColor = (decision: string) => {
     if (decision === "APPROVE") return "bg-green-50 text-green-700 border-green-200";
@@ -118,10 +213,11 @@ export default function Home() {
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path d="M20 4L4 10V20C4 28.84 10.95 37.04 20 40C29.05 37.04 36 28.84 36 20V10L20 4Z" fill="#0EA5E9" fillOpacity="0.1" stroke="#0EA5E9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M14 26V18" stroke="#0EA5E9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M20 26V14" stroke="#0EA5E9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M26 26V20" stroke="#0EA5E9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M20 3L5 9V19C5 28.5 11.5 36.5 20 39V3Z" fill="#0EA5E9"/>
+              <path d="M20 3L35 9V19C35 28.5 28.5 36.5 20 39V3Z" fill="#0369A1"/>
+              <path d="M13 24V18" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+              <path d="M20 24V14" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+              <path d="M27 24V20" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
             </svg>
             <div>
               <h1 className="text-3xl font-bold tracking-tight">TrustLine</h1>
@@ -142,6 +238,52 @@ export default function Home() {
             </a>
           </div>
         </header>
+
+        {/* ── OAuth verification result notice ── */}
+        {verificationNotice && (
+          <div
+            className={`p-4 rounded-xl border flex items-start gap-3 text-sm ${
+              verificationNotice.status === "completed" && verificationNotice.verified
+                ? "bg-green-50 border-green-200 text-green-800"
+                : verificationNotice.status === "completed" && !verificationNotice.verified
+                ? "bg-yellow-50 border-yellow-200 text-yellow-800"
+                : "bg-red-50 border-red-200 text-red-800"
+            }`}
+          >
+            {verificationNotice.status === "completed" && verificationNotice.verified && (
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {verificationNotice.status === "completed" && !verificationNotice.verified && (
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+            )}
+            {verificationNotice.status === "failed" && (
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            )}
+            <div>
+              <p className="font-semibold">
+                {verificationNotice.status === "completed" && verificationNotice.verified &&
+                  "Number Verification successful"}
+                {verificationNotice.status === "completed" && !verificationNotice.verified &&
+                  "Number Verification completed — not verified"}
+                {verificationNotice.status === "failed" && "Number Verification failed"}
+              </p>
+              <p className="mt-0.5 opacity-90">
+                {verificationNotice.status === "completed" && verificationNotice.verified &&
+                  `${verificationNotice.phoneNumber} is confirmed to match the device via OAuth. Updating the trust score below...`}
+                {verificationNotice.status === "completed" && !verificationNotice.verified &&
+                  `The OAuth flow completed for ${verificationNotice.phoneNumber}, but the number could not be verified as matching the device.`}
+                {verificationNotice.status === "failed" &&
+                  `A network or provider error occurred while verifying ${verificationNotice.phoneNumber}${verificationNotice.reason ? `: ${verificationNotice.reason}` : "."} You can try again.`}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Form ── */}
         <section className="bg-tl-surface p-6 rounded-xl shadow-sm border border-gray-100 space-y-5">
@@ -194,7 +336,7 @@ export default function Home() {
 
           {/* Submit button */}
           <button
-            onClick={checkTrust}
+            onClick={() => checkTrust()}
             disabled={loading}
             className="w-full inline-flex items-center justify-center gap-2 bg-tl-accent hover:bg-tl-accent-hover text-white font-semibold py-3 px-4 rounded-lg transition-colors shadow-sm hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-tl-accent focus:ring-offset-2"
           >
@@ -212,7 +354,7 @@ export default function Home() {
           <div className="text-xs text-tl-navy-light p-3 bg-gray-50 rounded-lg border border-gray-100">
             <strong className="block mb-2">Demo numbers:</strong>
             <ul className="space-y-1">
-              <li><span className="text-tl-success font-mono font-medium">+99999991000</span> — Clean number (APPROVE)</li>
+              <li><span className="text-tl-success font-mono font-medium">+99999991000</span> — Clean number (STEP_UP_VERIFICATION until OAuth is completed, then APPROVE)</li>
               <li><span className="text-tl-danger font-mono font-medium">+90000000001</span> — SIM Swap detected (demo scenario) (BLOCK)</li>
               <li><span className="text-tl-warning font-mono font-medium">+90000000003</span> — Number Verification pending (demo scenario) (STEP_UP_VERIFICATION)</li>
             </ul>
@@ -237,7 +379,12 @@ export default function Home() {
 
         {/* ── Progress Terminal ── */}
         {progress.length > 0 && (
-          <section className="bg-tl-navy text-tl-accent p-4 rounded-xl font-mono text-sm space-y-2 shadow-inner" aria-live="polite" aria-label="Analysis progress">
+          <section
+            ref={resultAreaRef}
+            className="bg-tl-navy text-tl-accent p-4 rounded-xl font-mono text-sm space-y-2 shadow-inner"
+            aria-live="polite"
+            aria-label="Analysis progress"
+          >
             {progress.map((msg, idx) => (
               <div key={idx} className={staggerClass(idx)}>
                 {msg}
@@ -285,34 +432,36 @@ export default function Home() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 shadow-sm">
                   <div className="text-xs text-tl-navy-light mb-2 font-semibold uppercase tracking-wider">SIM Swap Check</div>
-                  <pre className="font-mono text-xs bg-white p-2 rounded border border-gray-100 overflow-x-auto text-gray-800">
+                  <pre className="font-mono text-xs bg-white p-2 rounded border border-gray-100 text-gray-800 whitespace-pre-wrap break-words">
                     {JSON.stringify(result.signals.sim_swap, null, 2)}
                   </pre>
                 </div>
                 <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 shadow-sm flex flex-col justify-between">
                   <div>
                     <div className="text-xs text-tl-navy-light mb-2 font-semibold uppercase tracking-wider">Number Verification</div>
-                    <pre className="font-mono text-xs bg-white p-2 rounded border border-gray-100 overflow-x-auto text-gray-800">
+                    <pre className="font-mono text-xs bg-white p-2 rounded border border-gray-100 text-gray-800 whitespace-pre-wrap break-words">
                       {JSON.stringify(result.signals.number_verification, null, 2)}
                     </pre>
                   </div>
-                  {result.signals.number_verification?.status === "pending" && (
+                  {result.signals.number_verification?.status === "pending" &&
+                    !result.signals.number_verification?._demo_scenario && (
                     <a
                       href={`${API_BASE_URL}/auth/number-verification/start?phone_number=${encodeURIComponent(result.phone_number)}`}
-                      target="_blank"
-                      rel="noreferrer"
                       className="mt-4 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-tl-accent hover:bg-tl-accent-hover text-white text-sm font-semibold rounded-lg transition-colors shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-tl-accent focus:ring-offset-2"
                     >
                       Start OAuth Verification
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
                     </a>
+                  )}
+                  {result.signals.number_verification?.status === "pending" &&
+                    result.signals.number_verification?._demo_scenario && (
+                    <p className="mt-4 text-xs text-tl-navy-light italic">
+                      This demo number always shows &quot;pending&quot; verification to reliably demonstrate the STEP_UP_VERIFICATION scenario. Try a real number (e.g. +99999991000) to test the live OAuth flow.
+                    </p>
                   )}
                 </div>
                 <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 shadow-sm">
                   <div className="text-xs text-tl-navy-light mb-2 font-semibold uppercase tracking-wider">Device Status</div>
-                  <pre className="font-mono text-xs bg-white p-2 rounded border border-gray-100 overflow-x-auto text-gray-800">
+                  <pre className="font-mono text-xs bg-white p-2 rounded border border-gray-100 text-gray-800 whitespace-pre-wrap break-words">
                     {JSON.stringify(result.signals.device_status || {}, null, 2)}
                   </pre>
                 </div>
@@ -357,5 +506,13 @@ export default function Home() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={null}>
+      <HomeContent />
+    </Suspense>
   );
 }

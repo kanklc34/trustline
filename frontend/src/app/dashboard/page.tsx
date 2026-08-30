@@ -134,17 +134,16 @@ export default function Dashboard() {
               aria-hidden="true"
             >
               <path
-                d="M20 4L4 10V20C4 28.84 10.95 37.04 20 40C29.05 37.04 36 28.84 36 20V10L20 4Z"
+                d="M20 3L5 9V19C5 28.5 11.5 36.5 20 39V3Z"
                 fill="#0EA5E9"
-                fillOpacity="0.1"
-                stroke="#0EA5E9"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
               />
-              <path d="M14 26V18" stroke="#0EA5E9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M20 26V14" stroke="#0EA5E9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M26 26V20" stroke="#0EA5E9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M20 3L35 9V19C35 28.5 28.5 36.5 20 39V3Z"
+                fill="#0369A1"
+              />
+              <path d="M13 24V18" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+              <path d="M20 24V14" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+              <path d="M27 24V20" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Partner Dashboard</h1>
