@@ -1,8 +1,8 @@
-# TrustLine Entegrasyon Rehberi
+# TrustLine Integration Guide
 
-## Nasıl Entegre Edilir
+## How to Integrate
 
-Bir fintech veya e-ticaret platformu olarak, kullanıcı işlemlerinde dolandırıcılık riskini ölçmek için TrustLine API'sini aşağıdaki gibi çağırabilirsiniz. Sadece telefon numarasını ve işlem türünü (login, checkout, password_reset) göndermeniz yeterlidir.
+As a fintech or e-commerce platform, you can call the TrustLine API to measure fraud risk in user transactions as shown below. All you need to do is send the phone number and the action type (login, checkout, password_reset).
 
 ```bash
 curl -X POST "http://localhost:8000/api/evaluate" \
@@ -13,14 +13,14 @@ curl -X POST "http://localhost:8000/api/evaluate" \
          }'
 ```
 
-Dönen yanıt içerisindeki `trust_score` (0-100) veya doğrudan kural tabanlı `decision` (APPROVE, STEP_UP_VERIFICATION, BLOCK) değerine göre kullanıcı akışınızı yönlendirebilirsiniz.
+You can direct your user flow based on the `trust_score` (0-100) in the returned response, or directly on the rule-based `decision` (APPROVE, STEP_UP_VERIFICATION, BLOCK) value.
 
-## Fiyatlandırma Modeli (Öneri)
+## Pricing Model (Proposal)
 
-*Not: Aşağıdaki fiyatlandırma modeli kavramsal bir öneridir ve hackathon konsepti için hazırlanmıştır.*
+*Note: The pricing model below is a conceptual proposal prepared for the hackathon concept.*
 
-| Plan | Kapsam | Ücretlendirme |
+| Plan | Scope | Pricing |
 | --- | --- | --- |
-| **Free** | Ayda 100 API çağrısı (Geliştirme ve Test) | Ücretsiz |
-| **Growth** | Sınırsız API çağrısı, standart destek | İşlem başına $0.05 |
-| **Enterprise** | Özel SLA, dedike destek, özel risk kuralları | İletişime geçin |
+| **Free** | 100 API calls per month (Development & Testing) | Free |
+| **Growth** | Unlimited API calls, standard support | $0.05 per transaction |
+| **Enterprise** | Custom SLA, dedicated support, custom risk rules | Contact us |

@@ -6,39 +6,45 @@ from langgraph.graph import StateGraph, END
 from google import genai
 
 from risk_policy import RISK_POLICY_PROMPT
-from camara import check_sim_swap, check_device_status
+from camara import check_sim_swap, check_device_status, DEMO_PENDING_VERIFICATION_NUMBER
 from oauth import verification_results
 
-# 1. State Tanımlaması (State Machine'in her düğümde güncellediği veri yapısı)
+# 1. State Definition (Data structure updated by the State Machine at each node)
 class TrustAgentState(TypedDict):
     phone_number: str
     action_type: str
     
-    # Sinyaller
+    # Signals
     sim_swap_result: dict
     number_verification_result: dict
     device_status_result: dict
     
-    # Gemini Değerlendirmesi
+    # Gemini Evaluation
     trust_score: int
+    signal_breakdown: list
     reasoning: str
     confidence: str
     
-    # Nihai Karar ve Açıklama
+    # Final Decision and Explanation
     decision: str
     explanation: str
 
-# 2. Düğümler (Nodes)
+# 2. Nodes
 async def collect_signals(state: TrustAgentState) -> dict:
-    """SIM Swap, Number Verification ve Device Status sinyallerini toplar."""
+    """Collects SIM Swap, Number Verification, and Device Status signals."""
     phone_number = state["phone_number"]
     
-    # Sinyalleri topluyoruz
+    # Collecting signals
     sim_swap_data = await check_sim_swap(phone_number)
     device_status_data = await check_device_status(phone_number)
     
-    # Number Verification OAuth ile asenkron tamamlandığı için bellekteki son durumuna bakıyoruz
-    nv_data = verification_results.get(phone_number, {"status": "pending", "verified": None})
+    # Since Number Verification is completed asynchronously with OAuth, we check its latest state in memory
+    if phone_number == DEMO_PENDING_VERIFICATION_NUMBER:
+        # Demo scenario number: always shown as "pending", regardless of any OAuth flow
+        # that may have run for it in memory. Guarantees a reliable STEP_UP_VERIFICATION demo.
+        nv_data = {"status": "pending", "verified": None, "_demo_scenario": True}
+    else:
+        nv_data = verification_results.get(phone_number, {"status": "pending", "verified": None})
     
     return {
         "sim_swap_result": sim_swap_data,
@@ -47,36 +53,53 @@ async def collect_signals(state: TrustAgentState) -> dict:
     }
 
 def evaluate_risk(state: TrustAgentState) -> dict:
-    """Sinyalleri Gemini 2.5 Flash'a vererek trust_score hesaplatır."""
+    """Passes the signals to Gemini 2.5 Flash to calculate the trust_score."""
     api_key = os.getenv("GEMINI_API_KEY")
     
-    # Eğer API key girilmemişse, MOCK değerlendirme dönerek akışın kopmamasını sağlıyoruz
+    # If API key is not entered, return a MOCK evaluation so the flow doesn't break
     if not api_key or api_key == "your_gemini_api_key_here":
-        print("[MOCK] Gemini API Key bulunamadı, sahte (mock) değerlendirme yapılıyor.")
+        print("[MOCK] Gemini API Key not found, performing a mock evaluation.")
         
         sim_swapped = state["sim_swap_result"].get("swapped", False)
+        sim_swap_unavailable = state["sim_swap_result"].get("_error", False) or sim_swapped is None
         nv_verified = state["number_verification_result"].get("verified")
-        
-        if nv_verified == True and not sim_swapped:
+
+        if sim_swap_unavailable:
+            # Signal could not be retrieved — treat as unverified, not as safe.
+            score = 55
+        elif nv_verified == True and not sim_swapped:
             score = 90
         elif sim_swapped:
             score = 25
         else:
-            score = 60 # pending veya ambiguous
+            score = 60 # pending or ambiguous
             
         return {
             "trust_score": score,
-            "reasoning": "Gemini API Key olmadığı için simüle edilmiş MOCK gerekçe.",
+            "signal_breakdown": [{"signal": "mock", "impact": "neutral", "points": 0, "note": "Mock evaluation signal"}],
+            "reasoning": "Simulated MOCK reasoning because Gemini API Key is missing.",
             "confidence": "medium"
         }
     
-    # Gerçek Gemini entegrasyonu (yeni google-genai SDK)
+    # Real Gemini integration (new google-genai SDK)
     client = genai.Client(api_key=api_key)
     
     prompt = f"""
     {RISK_POLICY_PROMPT}
     
-    MEVCUT DURUM:
+    Return the response in the following JSON format:
+    {{
+      "trust_score": 45,
+      "signal_breakdown": [
+        {{"signal": "sim_swap", "impact": "negative", "points": -30, "note": "SIM has changed within the last 10 days"}},
+        {{"signal": "number_verification", "impact": "neutral", "points": 0, "note": "Verification is not complete yet"}},
+        {{"signal": "device_status", "impact": "positive", "points": 5, "note": "Device is actively connected (CONNECTED_DATA)"}}
+      ],
+      "reasoning": "General summary sentence goes here",
+      "confidence": "medium"
+    }}
+
+    CURRENT STATE:
     - Action Type: {state["action_type"]}
     - SIM Swap Result: {json.dumps(state["sim_swap_result"])}
     - Number Verification Result: {json.dumps(state["number_verification_result"])}
@@ -85,29 +108,44 @@ def evaluate_risk(state: TrustAgentState) -> dict:
     
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
+            model="gemini-3.1-flash-lite",
             contents=prompt,
         )
-        # JSON ayrıştırma (bazı LLM'ler markdown bloğu içinde dönebilir, temizliyoruz)
+        # JSON parsing (some LLMs might return it inside a markdown block, clean it up)
         response_text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(response_text)
-        
+
+        # Parse trust_score defensively: Gemini may occasionally return it as a
+        # string (e.g. "45") or a float (e.g. 45.0) instead of a plain int, or
+        # omit/garble it. We don't want a formatting quirk on this one field to
+        # throw away an otherwise valid reasoning/signal_breakdown response.
+        raw_score = data.get("trust_score", 50)
+        try:
+            score = int(round(float(raw_score)))
+        except (TypeError, ValueError):
+            print(f"[WARN] Gemini returned a non-numeric trust_score ({raw_score!r}); defaulting to 50.")
+            score = 50
+        # Clamp to the documented 0-100 range in case the model drifts outside it.
+        score = max(0, min(100, score))
+
         return {
-            "trust_score": int(data.get("trust_score", 50)),
-            "reasoning": data.get("reasoning", "Açıklama üretilemedi."),
+            "trust_score": score,
+            "signal_breakdown": data.get("signal_breakdown", []),
+            "reasoning": data.get("reasoning", "Could not generate reasoning."),
             "confidence": data.get("confidence", "low")
         }
     except Exception as e:
-        print(f"[HATA] Gemini Evaluation Error: {e}")
-        # API hatası durumunda fail-safe yaklaşım (güvenliği riske atmamak için düşük skor)
+        print(f"[ERROR] Gemini Evaluation Error: {e}")
+        # Fail-safe approach in case of API error (low score to avoid risking security)
         return {
             "trust_score": 30,
-            "reasoning": "Yapay zeka değerlendirmesi sırasında bir hata oluştu. Varsayılan düşük skor atandı.",
+            "signal_breakdown": [],
+            "reasoning": "An error occurred during AI evaluation. Default low score assigned.",
             "confidence": "low"
         }
 
 def decide(state: TrustAgentState) -> dict:
-    """trust_score değerine göre kesin kural tabanlı kararı üretir. (Sınırlar LLM'e bırakılmaz)"""
+    """Generates a strict rule-based decision based on the trust_score. (Thresholds are not left to the LLM)"""
     score = state.get("trust_score", 0)
     
     if score >= 70:
@@ -120,41 +158,41 @@ def decide(state: TrustAgentState) -> dict:
     return {"decision": decision}
 
 def explain(state: TrustAgentState) -> dict:
-    """Nihai durumu loglanabilir ve UI'a dönülebilir bir metne paketler."""
+    """Packages the final state into a text that can be logged and returned to the UI."""
     decision = state.get("decision")
     reasoning = state.get("reasoning")
     score = state.get("trust_score")
     
-    explanation = f"KARAR: {decision} (Skor: {score}/100) | NEDEN: {reasoning}"
+    explanation = f"DECISION: {decision} (Score: {score}/100) | REASONING: {reasoning}"
     return {"explanation": explanation}
 
 
-# 3. LangGraph Workflow (State Machine) Kurulumu
+# 3. LangGraph Workflow (State Machine) Setup
 workflow = StateGraph(TrustAgentState)
 
-# Düğümleri ekliyoruz
+# Add nodes
 workflow.add_node("collect_signals", collect_signals)
 workflow.add_node("evaluate_risk", evaluate_risk)
 workflow.add_node("decide", decide)
 workflow.add_node("explain", explain)
 
-# Bağlantıları (edges) kuruyoruz
+# Set edges
 workflow.set_entry_point("collect_signals")
 workflow.add_edge("collect_signals", "evaluate_risk")
 workflow.add_edge("evaluate_risk", "decide")
 workflow.add_edge("decide", "explain")
 workflow.add_edge("explain", END)
 
-# Ajanı derliyoruz
+# Compile agent
 trust_agent = workflow.compile()
 
 async def run_trust_agent(phone_number: str, action_type: str = "login") -> dict:
-    """Dışarıdan çağrılacak yardımcı fonksiyon"""
+    """Helper function to be called from the outside"""
     initial_state = {
         "phone_number": phone_number,
         "action_type": action_type
     }
     
-    # LangGraph state machine'i asenkron çalıştır
+    # Run the LangGraph state machine asynchronously
     final_state = await trust_agent.ainvoke(initial_state)
     return final_state

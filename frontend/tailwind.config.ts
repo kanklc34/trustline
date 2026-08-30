@@ -11,6 +11,17 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        tl: {
+          navy: "var(--tl-navy)",
+          "navy-light": "var(--tl-navy-light)",
+          accent: "var(--tl-accent)",
+          "accent-hover": "var(--tl-accent-hover)",
+          success: "var(--tl-success)",
+          warning: "var(--tl-warning)",
+          danger: "var(--tl-danger)",
+          bg: "var(--tl-bg)",
+          surface: "var(--tl-surface)",
+        }
       },
     },
   },

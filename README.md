@@ -77,13 +77,13 @@ Once both servers are running, use the UI at `http://localhost:3000` to test the
    - Expected: High trust score (85+), green APPROVE card.
    
 2. **SIM Swapped Recently (BLOCK)**:
-   - Input: `+99999990404`
-   - Expected: Low trust score (<40), red BLOCK card.
+   - Input: `+90000000001`
+   - Expected: Low trust score (<30), red BLOCK card.
 
 3. **Ambiguous/Pending (STEP-UP VERIFICATION)**:
    - Input: `+99999990500` or any number without completed OAuth.
    - Expected: Medium trust score (40-69), yellow STEP_UP_VERIFICATION card.
-   - *You can click the "OAuth Doğrulamayı Başlat" link in the UI to simulate the 3-legged Number Verification flow.*
+   - *You can click the "Start OAuth Verification" link in the UI to simulate the 3-legged Number Verification flow.*
 
 ---
 
@@ -91,8 +91,8 @@ Once both servers are running, use the UI at `http://localhost:3000` to test the
 
 This is a hackathon prototype. All testing uses Nokia NaC's **simulator phone numbers** — no real user data is collected, stored, or processed. A production deployment of TrustLine would require full compliance with applicable data protection regulations (e.g. GDPR, KVKK) before processing real phone numbers or telecom signals.
 
-## Yeni Özellikler (v2)
+## New Features (v2)
 
-- **Device Status Sinyali**: CAMARA üzerinden cihazın ağa bağlı olup olmadığını kontrol eden üçüncü bir risk sinyali eklendi.
-- **Entegrasyon Rehberi**: Fintech/E-ticaret sistemlerinin API'yi nasıl çağıracağını ve örnek fiyatlandırmayı gösteren `backend/INTEGRATION.md` belgesi eklendi.
-- **Partner Dashboard**: Yapılan risk değerlendirmelerini listeleyen, onay/ret istatistiklerini maskeli numaralarla gösteren bir raporlama arayüzü ve API eklendi.
+- **Device Status Signal**: A third risk signal added that checks whether the device is connected to the network via CAMARA.
+- **Integration Guide**: `backend/INTEGRATION.md` document added, showing how fintech/e-commerce systems can call the API and example pricing.
+- **Partner Dashboard**: A reporting interface and API added that lists risk evaluations, showing approval/rejection statistics with masked phone numbers.

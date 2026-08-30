@@ -3,35 +3,33 @@ import httpx
 import urllib.parse
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
+from nokia_client import get_nokia_headers
 
 router = APIRouter()
 
-# Bellek içi veri deposu: OAuth dönüşünde doğrulama sonuçlarını saklayacağımız geçici yapı.
-# Gerçek production sistemlerinde bu verilerin Redis vb. dağıtık/kalıcı bir veritabanında tutulması gerekir.
+# In-memory data store: Temporary structure to hold verification results upon OAuth callback.
+# In a real production system, this data should be stored in a distributed/persistent database like Redis.
 verification_results = {}
 
-# SIM Swap testinde doğrulanan gerçek host: network-as-code.p-eu.apihub.nokia.io
+# Real host verified in SIM Swap test: network-as-code.p-eu.apihub.nokia.io
 NAC_AUTH_HOST = "https://network-as-code.p-eu.apihub.nokia.io"
 NAC_API_HOST = "https://network-as-code.p-eu.apihub.nokia.io/passthrough/camara/v1/number-verification"
 
-# Dinamik olarak çekilen değerleri bellekte tutuyoruz (uygulama her açıldığında tekrar çekilir)
+# We cache dynamically fetched values in memory (fetched again if the app restarts)
 _oauth_config_cache: dict = {}
 
 async def get_oauth_config() -> dict:
     """
-    Dökümanın 1. ve 2. adımlarını uygular:
+    Implements steps 1 and 2 of the documentation:
     1) /oauth2/v1/auth/clientcredentials -> client_id, client_secret
     2) /.well-known/openid-configuration -> authorization_endpoint, token_endpoint
-    Bu bilgiler değişmediği için basitçe önbelleğe alınır (process ömrü boyunca bir kez çekilir).
+    Since this information doesn't change, it is simply cached (fetched once per process lifetime).
     """
     if _oauth_config_cache:
         return _oauth_config_cache
 
     api_key = os.getenv("NOKIA_NAC_API_KEY")
-    headers = {
-        "x-rapidapi-host": "network-as-code.nokia.rapidapi.com",
-        "x-rapidapi-key": api_key,
-    }
+    headers = get_nokia_headers(api_key)
 
     async with httpx.AsyncClient() as client:
         cred_res = await client.get(f"{NAC_AUTH_HOST}/oauth2/v1/auth/clientcredentials", headers=headers)
@@ -53,10 +51,10 @@ async def get_oauth_config() -> dict:
 @router.get("/auth/number-verification/start", tags=["OAuth"])
 async def start_verification(phone_number: str):
     """
-    [Adım 3] Kullanıcıyı CAMARA Number Verification (OAuth 2.0) sayfasına yönlendirir.
-    Kullanıcı kendi numarasını doğrulamak için şebeke sağlayıcısına (consent) gönderilir.
+    [Step 3] Redirects the user to the CAMARA Number Verification (OAuth 2.0) page.
+    The user is sent to the network provider (consent) to verify their own number.
     """
-    # Query parametresinden gelen numarayı normalize ediyoruz (bkz. callback'teki aynı not).
+    # Normalize the number coming from the query parameter (see the same note in the callback).
     phone_number = phone_number.strip()
     if not phone_number.startswith("+"):
         phone_number = "+" + phone_number.lstrip()
@@ -64,17 +62,17 @@ async def start_verification(phone_number: str):
     api_key = os.getenv("NOKIA_NAC_API_KEY")
     redirect_uri = os.getenv("REDIRECT_URI", "http://localhost:8000/auth/number-verification/callback")
 
-    # API key tanımlı değilse geliştirici deneyimini (DX) bozmamak için mock yönlendirmesi yapılır.
+    # If the API key is not defined, a mock redirect is performed so as not to break developer experience (DX).
     if not api_key or api_key == "your_nokia_nac_api_key_here":
-        print(f"[MOCK] OAuth Start: '{phone_number}' için sahte (mock) akış başlatılıyor.")
+        print(f"[MOCK] OAuth Start: Initiating mock flow for '{phone_number}'.")
         mock_code = "mock_auth_code_for_" + phone_number.replace("+", "")
         return RedirectResponse(url=f"{redirect_uri}?code={mock_code}&state={phone_number}")
 
     try:
         config = await get_oauth_config()
     except Exception as e:
-        print(f"[HATA] OAuth config alınamadı: {e}")
-        raise HTTPException(status_code=502, detail="Nokia NaC OAuth yapılandırması alınamadı.")
+        print(f"[ERROR] Could not get OAuth config: {e}")
+        raise HTTPException(status_code=502, detail="Failed to retrieve Nokia NaC OAuth configuration.")
 
     scope = "dpv:FraudPreventionAndDetection number-verification:verify"
 
@@ -84,8 +82,8 @@ async def start_verification(phone_number: str):
         "redirect_uri": redirect_uri,
         "scope": scope,
         "login_hint": phone_number,
-        # Güvenlik gereği state içerisine hem random token (CSRF önleme) hem de bağlam konulmalıdır.
-        # Bu prototip için, geri dönüşte numarayı anlayabilmek adına doğrudan numarayı state'te taşıyoruz.
+        # For security, the state should contain both a random token (CSRF prevention) and context.
+        # For this prototype, we carry the number directly in the state to identify it upon return.
         "state": phone_number
     }
 
@@ -95,25 +93,25 @@ async def start_verification(phone_number: str):
 @router.get("/auth/number-verification/callback", tags=["OAuth"])
 async def verification_callback(code: str, state: str):
     """
-    [Adım 4 ve 5] Kullanıcı şebeke sağlayıcısından (consent) geri döndüğünde çağrılan endpoint.
-    'code' değeri token'a çevrilir, bu token ile gerçek Number Verification API'sine istek atılır.
+    [Steps 4 and 5] The endpoint called when the user returns from the network provider (consent).
+    The 'code' is exchanged for a token, and a request is made to the actual Number Verification API with this token.
     """
-    # NOT: OAuth redirect zincirinde '+' karakteri bazen URL query string kurallarına göre
-    # boşluğa dönüşebiliyor (application/x-www-form-urlencoded'da '+' = boşluk demektir).
-    # Bu yüzden numarayı kullanmadan önce normalize ediyoruz: boşlukları temizle, eksikse '+' ekle.
+    # NOTE: In the OAuth redirect chain, the '+' character can sometimes turn into
+    # a space according to URL query string rules (in application/x-www-form-urlencoded, '+' = space).
+    # Therefore, we normalize the number before using it: clean spaces, add '+' if missing.
     phone_number = state.strip()
     if not phone_number.startswith("+"):
         phone_number = "+" + phone_number.lstrip()
     redirect_uri = os.getenv("REDIRECT_URI", "http://localhost:8000/auth/number-verification/callback")
 
-    # Mock / Simülasyon mantığı (Eğer gerçek kimlik bilgileri yoksa)
+    # Mock / Simulation logic (If real credentials are not present)
     if code.startswith("mock_auth_code_for_"):
-        print(f"[MOCK] Callback alındı. Numara: {phone_number}")
-        # Test senaryosu gereği: Eğer numara '+99999990500' ise doğrulama başarısız (False) dönsün
+        print(f"[MOCK] Callback received. Number: {phone_number}")
+        # Test scenario: If the number is '+99999990500', return verification as failed (False)
         is_verified = False if phone_number == "+99999990500" else True
         verification_results[phone_number] = {"verified": is_verified, "status": "completed"}
         return {
-            "message": "Doğrulama simüle edildi (MOCK).", 
+            "message": "Verification simulated (MOCK).", 
             "phone_number": phone_number, 
             "verified": is_verified
         }
@@ -121,10 +119,10 @@ async def verification_callback(code: str, state: str):
     try:
         config = await get_oauth_config()
     except Exception as e:
-        print(f"[HATA] OAuth config alınamadı: {e}")
-        raise HTTPException(status_code=502, detail="Nokia NaC OAuth yapılandırması alınamadı.")
+        print(f"[ERROR] Could not get OAuth config: {e}")
+        raise HTTPException(status_code=502, detail="Failed to retrieve Nokia NaC OAuth configuration.")
 
-    # Gerçek token alma (Token Exchange) payload'u
+    # Payload for getting the real token (Token Exchange)
     token_payload = {
         "grant_type": "authorization_code",
         "code": code,
@@ -135,19 +133,18 @@ async def verification_callback(code: str, state: str):
     
     async with httpx.AsyncClient() as client:
         try:
-            # 4. Adım: Yetkilendirme kodu (code) ile Access Token alıyoruz
+            # Step 4: Obtain Access Token using the authorization code
             token_res = await client.post(config["token_endpoint"], data=token_payload)
             token_res.raise_for_status()
             token_data = token_res.json()
             access_token = token_data.get("access_token")
             
-            # 5. Adım: Alınan Access Token ile 'Number Verification' sorgusunu yapıyoruz
+            # Step 5: Make the 'Number Verification' request using the retrieved Access Token
             verify_url = f"{NAC_API_HOST}/number-verification/v0/verify"
             verify_headers = {
+                **get_nokia_headers(),
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
-                "x-rapidapi-key": os.getenv("NOKIA_NAC_API_KEY"),
-                "x-rapidapi-host": "network-as-code.nokia.rapidapi.com",
             }
             verify_payload = {"phoneNumber": phone_number}
             
@@ -156,10 +153,10 @@ async def verification_callback(code: str, state: str):
             
             verify_data = verify_res.json()
             
-            # API'den dönen genelde 'devicePhoneNumberVerified' alanıdır (bool)
+            # The API usually returns 'devicePhoneNumberVerified' (bool)
             is_verified = verify_data.get("devicePhoneNumberVerified", False)
             
-            # Sonucu LangGraph ajanı okusun diye bellekteki sözlüğe kaydediyoruz
+            # Save the result in the in-memory dictionary for the LangGraph agent to read
             verification_results[phone_number] = {
                 "verified": is_verified,
                 "raw_data": verify_data,
@@ -167,11 +164,11 @@ async def verification_callback(code: str, state: str):
             }
             
             return {
-                "message": "Number Verification başarıyla tamamlandı.", 
+                "message": "Number Verification completed successfully.", 
                 "verified": is_verified
             }
 
         except httpx.HTTPStatusError as e:
-            print(f"[HATA] Number Verification Error: {e.response.text}")
+            print(f"[ERROR] Number Verification Error: {e.response.text}")
             verification_results[phone_number] = {"verified": False, "status": "failed", "error": str(e)}
-            raise HTTPException(status_code=500, detail="Doğrulama sırasında şebeke hatası oluştu.")
+            raise HTTPException(status_code=500, detail="A network error occurred during verification.")
