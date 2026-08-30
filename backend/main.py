@@ -85,6 +85,8 @@ async def api_evaluate_trust(request: EvaluateRequest):
                 "decision": final_state.get("decision"),
                 "explanation": final_state.get("explanation"),
                 "reasoning": final_state.get("reasoning"),
+                "signal_breakdown": final_state.get("signal_breakdown"),
+                "confidence": final_state.get("confidence"),
                 "signals": {
                     "sim_swap": final_state.get("sim_swap_result"),
                     "number_verification": final_state.get("number_verification_result"),
