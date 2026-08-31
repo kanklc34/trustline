@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: trustline-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Intentionally left unset for the public demo deployment: with no
+      # GEMINI_API_KEY / NOKIA_NAC_API_KEY configured, the backend runs in
+      # deterministic demo mode (see camara.py / agent.py), which avoids
+      # exposing real API credentials and avoids depending on Nokia's
+      # sandbox uptime for the hackathon demo.
+      - key: FRONTEND_URL
+        sync: false
+      - key: REDIRECT_URI
+        sync: false

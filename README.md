@@ -100,3 +100,7 @@ This is a hackathon prototype. All testing uses Nokia NaC's **simulator phone nu
 - **Device Status Signal**: A third risk signal added that checks whether the device is connected to the network via CAMARA.
 - **Integration Guide**: `backend/INTEGRATION.md` document added, showing how fintech/e-commerce systems can call the API and example pricing.
 - **Partner Dashboard**: A reporting interface and API added that lists risk evaluations, showing approval/rejection statistics with masked phone numbers.
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).

@@ -59,13 +59,43 @@ def evaluate_risk(state: TrustAgentState) -> dict:
     # If API key is not entered, return a MOCK evaluation so the flow doesn't break
     if not api_key or api_key == "your_gemini_api_key_here":
         print("[MOCK] Gemini API Key not found, performing a mock evaluation.")
-        
+
         sim_swapped = state["sim_swap_result"].get("swapped", False)
         sim_swap_unavailable = state["sim_swap_result"].get("_error", False) or sim_swapped is None
+        device_status = state["device_status_result"].get("connectivityStatus", "UNKNOWN")
+        nv_status = state["number_verification_result"].get("status")
         nv_verified = state["number_verification_result"].get("verified")
 
+        # Build a signal breakdown that mirrors the real risk policy's logic
+        # (see risk_policy.py), so the demo/mock deployment still shows the
+        # same transparent, signal-by-signal reasoning as the live version —
+        # instead of a generic "mock evaluation" placeholder that undersells
+        # the product's core feature.
+        breakdown = []
+
         if sim_swap_unavailable:
-            # Signal could not be retrieved — treat as unverified, not as safe.
+            breakdown.append({"signal": "sim_swap", "impact": "neutral", "points": 0, "note": "SIM Swap signal unavailable; treated as unverified"})
+            score = 55
+        elif sim_swapped:
+            breakdown.append({"signal": "sim_swap", "impact": "negative", "points": -30, "note": "SIM has changed within the last 240 hours"})
+        else:
+            breakdown.append({"signal": "sim_swap", "impact": "neutral", "points": 0, "note": "No recent SIM change detected"})
+
+        if nv_verified is True:
+            breakdown.append({"signal": "number_verification", "impact": "positive", "points": 15, "note": "Number is verified to match the device"})
+        elif nv_verified is False:
+            breakdown.append({"signal": "number_verification", "impact": "negative", "points": -20, "note": "Number verification failed"})
+        else:
+            breakdown.append({"signal": "number_verification", "impact": "negative", "points": -20, "note": f"Number verification is {nv_status or 'pending'}; treated as unverified"})
+
+        if device_status == "NOT_CONNECTED":
+            breakdown.append({"signal": "device_status", "impact": "negative", "points": -20, "note": "Device is not connected to the network"})
+        elif device_status in ("CONNECTED_DATA", "CONNECTED_SMS"):
+            breakdown.append({"signal": "device_status", "impact": "positive", "points": 5, "note": f"Device is actively connected ({device_status})"})
+        else:
+            breakdown.append({"signal": "device_status", "impact": "neutral", "points": 0, "note": f"Device status: {device_status}"})
+
+        if sim_swap_unavailable:
             score = 55
         elif nv_verified == True and not sim_swapped:
             score = 90
@@ -73,11 +103,11 @@ def evaluate_risk(state: TrustAgentState) -> dict:
             score = 25
         else:
             score = 60 # pending or ambiguous
-            
+
         return {
             "trust_score": score,
-            "signal_breakdown": [{"signal": "mock", "impact": "neutral", "points": 0, "note": "Mock evaluation signal"}],
-            "reasoning": "Simulated MOCK reasoning because Gemini API Key is missing.",
+            "signal_breakdown": breakdown,
+            "reasoning": "Demo mode (no live Gemini/Nokia credentials configured): this evaluation uses the same fixed decision thresholds and risk-policy logic as the full system, applied deterministically instead of via live LLM reasoning.",
             "confidence": "medium"
         }
     
