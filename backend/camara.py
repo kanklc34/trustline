@@ -5,21 +5,10 @@ from nokia_client import get_nokia_headers
 # Real endpoint verified from Nokia NaC playground (taken from Test Endpoint cURL output)
 SIM_SWAP_URL = "https://network-as-code.p-eu.apihub.nokia.io/passthrough/camara/v1/sim-swap/sim-swap/v0/check"
 
-# --- DEMO SCENARIO NUMBER ---
-# Nokia's general simulator numbers (e.g. +99999990404, +99999991000) do not
-# return a consistent result in the SIM Swap API (verified in playground and
-# in live testing: even numbers expected to be "clean" occasionally returned
-# swapped=true from the live sandbox — these numbers are designed to test
-# different HTTP status codes and edge cases, not stable SIM-swap scenarios).
-# Therefore, to reliably demonstrate every scenario in the demo, we use
-# predefined "demo scenario numbers" without ever hitting the real API.
-# This is EXPLICITLY documented and labeled in the frontend as well.
-DEMO_CLEAN_NUMBER = (
-    "+99999991000"  # Only for demo purposes — always returns a clean (APPROVE) result.
-    # Previously routed to the real Nokia sandbox; moved to a deterministic
-    # demo scenario after live testing showed it inconsistently returned
-    # swapped=true, which broke the APPROVE demo.
-)
+# --- DEMO SCENARIO NUMBERS (fictional, never hit the real Nokia API) ---
+# These numbers are not real Nokia sandbox devices; they're used to reliably
+# demonstrate scenarios where the live sandbox doesn't offer a stable,
+# confirmed test number (e.g. Device Status, Number Verification pending state).
 DEMO_SWAPPED_NUMBER = (
     "+90000000001"  # Only for demo purposes, not a real simulator number
 )
@@ -32,19 +21,22 @@ DEMO_PENDING_VERIFICATION_NUMBER = (
     # STEP_UP_VERIFICATION scenario in the demo without depending on OAuth flow state.
 )
 
+# --- OFFICIAL NOKIA SIM SWAP SIMULATOR NUMBERS ---
+# Confirmed directly by Nokia Network-as-Code support (ticket #140813, Aug 31 2026):
+# these two numbers reliably return the documented SIM Swap result from the real
+# sandbox API. Unlike the DEMO_* numbers above, calls for these numbers DO hit
+# the live Nokia endpoint — no mocking needed.
+#   +99999991000 -> {"swapped": true}
+#   +99999991001 -> {"swapped": false}
+NOKIA_SIM_SWAPPED_NUMBER = "+99999991000"
+NOKIA_SIM_CLEAN_NUMBER = "+99999991001"
+
 
 async def check_sim_swap(phone_number: str) -> dict:
     """
     Checks via the CAMARA API whether a SIM change has occurred
     for the specified phone number within the last 240 hours (10 days).
     """
-    # Demo scenario number: return a predefined "clean" result without hitting the real API.
-    if phone_number == DEMO_CLEAN_NUMBER:
-        print(
-            f"[DEMO SCENARIO] Returning predefined SIM Swap=false scenario for '{phone_number}' (real API was not called)."
-        )
-        return {"swapped": False, "_demo_scenario": True}
-
     # Demo scenario number: return a predefined "risky" result without hitting the real API.
     if phone_number == DEMO_SWAPPED_NUMBER:
         print(
@@ -107,10 +99,16 @@ async def check_device_status(phone_number: str) -> dict:
     # For demo scenario numbers (both SIM Swap and Device Status demo numbers)
     # we never hit the real API — these are not real numbers recognized in Nokia's
     # simulator, but fictional numbers specific to our demo scenario.
-    if phone_number == DEMO_CLEAN_NUMBER:
-        # APPROVE demo scenario; Device Status should look healthy/normal.
+    #
+    # NOTE: Nokia support only confirmed stable behavior for NOKIA_SIM_SWAPPED_NUMBER /
+    # NOKIA_SIM_CLEAN_NUMBER on the SIM Swap endpoint specifically (ticket #140813).
+    # There's no such confirmation for the Device Status endpoint, so we still
+    # return a fixed, predictable value for these two numbers here rather than
+    # risking the same kind of inconsistent sandbox behavior we hit before.
+    if phone_number in (NOKIA_SIM_SWAPPED_NUMBER, NOKIA_SIM_CLEAN_NUMBER):
         print(
-            f"[DEMO SCENARIO] Returning default (CONNECTED_DATA) Device Status for '{phone_number}' (real API was not called)."
+            f"[DEMO SCENARIO] Returning default (CONNECTED_DATA) Device Status for '{phone_number}' "
+            "(real API was not called — only the SIM Swap endpoint is confirmed stable for this number)."
         )
         return {"connectivityStatus": "CONNECTED_DATA", "_demo_scenario": True}
 

@@ -72,22 +72,26 @@ Follow these steps to run the complete environment (Backend + Frontend) locally.
 
 Once both servers are running, use the UI at `http://localhost:3000` to test the agent:
 
-1. **Clean Number (STEP_UP → APPROVE after OAuth)**:
-   - Input: `+99999991000`
-   - Expected right after entering the number: medium trust score (~60), yellow STEP_UP_VERIFICATION card — this is because SIM Swap is a fixed-clean demo scenario, but Number Verification starts as "pending" until OAuth completes.
-   - Click "Start OAuth Verification" on the result card to run the real 3-legged Number Verification OAuth flow for this number (it's not fictional like the other demo numbers, so it can complete a real Nokia consent flow). Once verified, the page automatically re-checks and the score rises to 85+, green APPROVE.
-   - *Note: SIM Swap and Device Status for this number are a fixed demo scenario handled entirely by the backend — they do not call the real Nokia sandbox, since Nokia's generic simulator numbers were found to return inconsistent SIM Swap results in testing. Only Number Verification uses the real OAuth flow for this number.*
+1. **Clean SIM (STEP_UP → APPROVE after OAuth)**:
+   - Input: `+99999991001`
+   - Expected right after entering the number: medium trust score (~60), yellow STEP_UP_VERIFICATION card — this is because Number Verification starts as "pending" until OAuth completes.
+   - Click "Start OAuth Verification" on the result card to run the real 3-legged Number Verification OAuth flow for this number. Once verified, the page automatically re-checks and the score rises to 85+, green APPROVE.
+   - *Note: SIM Swap for this number calls the real Nokia sandbox — Nokia Network-as-Code support confirmed (support ticket #140813) that `+99999991001` reliably returns `{"swapped": false}` on the live SIM Swap endpoint. Device Status still uses a fixed value for this number, since Nokia has only confirmed stable behavior for the SIM Swap endpoint specifically.*
 
-2. **SIM Swapped Recently (BLOCK)**:
+2. **SIM Swapped Recently (BLOCK) — real Nokia sandbox**:
+   - Input: `+99999991000`
+   - Expected: Low trust score (<30), red BLOCK card.
+   - *Note: Confirmed by Nokia Network-as-Code support (ticket #140813) to reliably return `{"swapped": true}` on the live SIM Swap endpoint.*
+
+3. **SIM Swapped Recently (BLOCK) — fallback demo scenario**:
    - Input: `+90000000001`
    - Expected: Low trust score (<30), red BLOCK card.
-   - *Note: Fixed demo scenario number, does not call the real Nokia sandbox.*
+   - *Note: Fixed demo scenario number, does not call the real Nokia sandbox. Useful as a fallback if the live sandbox is unavailable.*
 
-3. **Ambiguous/Pending (STEP-UP VERIFICATION)**:
+4. **Ambiguous/Pending (STEP-UP VERIFICATION)**:
    - Input: `+90000000003`
    - Expected: Medium trust score (40-69), yellow STEP_UP_VERIFICATION card.
    - *Note: Fixed demo scenario number — SIM Swap and Device Status are always returned as clean, while Number Verification is always shown as "pending" regardless of OAuth state, in order to reliably demonstrate this scenario in a demo.*
-   - *You can also click the "Start OAuth Verification" link on any result card to run the real 3-legged Number Verification OAuth flow end-to-end.*
 
 ---
 

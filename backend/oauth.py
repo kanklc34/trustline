@@ -5,14 +5,17 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from nokia_client import get_nokia_headers
 from camara import (
-    DEMO_CLEAN_NUMBER,
     DEMO_SWAPPED_NUMBER,
     DEMO_NOT_CONNECTED_NUMBER,
     DEMO_PENDING_VERIFICATION_NUMBER,
 )
 
+# Numbers that never hit a real OAuth consent flow — they're fictional and
+# Nokia's sandbox correctly rejects them with "Unknown device". Note that
+# NOKIA_SIM_SWAPPED_NUMBER / NOKIA_SIM_CLEAN_NUMBER are NOT included here:
+# those are real, Nokia-confirmed numbers (ticket #140813) that CAN complete
+# a genuine 3-legged OAuth flow, so they should go through the real flow below.
 DEMO_NUMBERS = {
-    DEMO_CLEAN_NUMBER,
     DEMO_SWAPPED_NUMBER,
     DEMO_NOT_CONNECTED_NUMBER,
     DEMO_PENDING_VERIFICATION_NUMBER,

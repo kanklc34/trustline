@@ -45,7 +45,7 @@ function Spinner() {
 
 function HomeContent() {
   const searchParams = useSearchParams();
-  const [phoneNumber, setPhoneNumber] = useState("+99999991000");
+  const [phoneNumber, setPhoneNumber] = useState("+99999991001");
   const [actionType, setActionType] = useState("login");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string[]>([]);
@@ -303,7 +303,7 @@ function HomeContent() {
               className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-tl-accent focus:border-tl-accent outline-none transition-shadow text-sm ${
                 phoneError ? "border-red-400 bg-red-50" : "border-gray-200"
               }`}
-              placeholder="+99999991000"
+              placeholder="+99999991001"
               aria-describedby={phoneError ? "phone-error" : undefined}
               aria-invalid={!!phoneError}
             />
@@ -354,8 +354,9 @@ function HomeContent() {
           <div className="text-xs text-tl-navy-light p-3 bg-gray-50 rounded-lg border border-gray-100">
             <strong className="block mb-2">Demo numbers:</strong>
             <ul className="space-y-1">
-              <li><span className="text-tl-success font-mono font-medium">+99999991000</span> — Clean number (STEP_UP_VERIFICATION until OAuth is completed, then APPROVE)</li>
-              <li><span className="text-tl-danger font-mono font-medium">+90000000001</span> — SIM Swap detected (demo scenario) (BLOCK)</li>
+              <li><span className="text-tl-success font-mono font-medium">+99999991001</span> — Clean SIM (Nokia-confirmed) (STEP_UP_VERIFICATION until OAuth is completed, then APPROVE)</li>
+              <li><span className="text-tl-danger font-mono font-medium">+99999991000</span> — SIM Swap detected (Nokia-confirmed) (BLOCK)</li>
+              <li><span className="text-tl-danger font-mono font-medium">+90000000001</span> — SIM Swap detected, fallback demo scenario (BLOCK)</li>
               <li><span className="text-tl-warning font-mono font-medium">+90000000003</span> — Number Verification pending (demo scenario) (STEP_UP_VERIFICATION)</li>
             </ul>
           </div>
@@ -455,7 +456,7 @@ function HomeContent() {
                   {result.signals.number_verification?.status === "pending" &&
                     result.signals.number_verification?._demo_scenario && (
                     <p className="mt-4 text-xs text-tl-navy-light italic">
-                      This demo number always shows &quot;pending&quot; verification to reliably demonstrate the STEP_UP_VERIFICATION scenario. Try a real number (e.g. +99999991000) to test the live OAuth flow.
+                      This demo number always shows &quot;pending&quot; verification to reliably demonstrate the STEP_UP_VERIFICATION scenario. Try a real number (e.g. +99999991001) to test the live OAuth flow.
                     </p>
                   )}
                 </div>
