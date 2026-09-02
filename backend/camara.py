@@ -62,6 +62,16 @@ async def check_sim_swap(phone_number: str) -> dict:
 
     # Developer convenience: If the API Key is not defined, let's simulate instead of throwing an error.
     if not api_key or api_key == "your_nokia_nac_api_key_here":
+        # Even without a real key, simulate the Nokia-confirmed numbers correctly
+        # instead of blindly returning "clean" for everything — otherwise both
+        # NOKIA_SIM_SWAPPED_NUMBER and NOKIA_SIM_CLEAN_NUMBER would look identical
+        # in mock mode, which defeats the purpose of having two distinct demo
+        # scenarios (e.g. when running the public demo deployment with no keys set).
+        if phone_number == NOKIA_SIM_SWAPPED_NUMBER:
+            print(
+                f"[MOCK] NOKIA_NAC_API_KEY not found. Simulating known result for '{phone_number}' (swapped=true)."
+            )
+            return {"swapped": True, "_mock_simulated": True}
         print(
             f"[MOCK] Warning: NOKIA_NAC_API_KEY not found. Returning simulation data for '{phone_number}'."
         )
