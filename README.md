@@ -5,7 +5,7 @@
 ## Architecture
 
 - **Backend**: Python + FastAPI
-- **AI Agent**: LangGraph (State Machine) + Google Gemini 3.5 Flash Lite
+- **AI Agent**: LangGraph (State Machine) + Google Gemini 3.1 Flash Lite
 - **Frontend**: Next.js (App Router) + TailwindCSS
 - **Network APIs**: Nokia Network-as-Code (NaC) Sandbox (SIM Swap & Number Verification)
 
